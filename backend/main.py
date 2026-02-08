@@ -13,109 +13,101 @@ from validator.google import validate_google_feed
 from report import generate_pdf_report
 
 
-# ---------------- APP ----------------
+# =========================
+# APP
+# =========================
 
 app = FastAPI(
     title="FeedFix API",
-    description="Analiza feedów Google Shopping",
     version="1.0"
 )
 
 
-# ---------------- CORS ----------------
+# =========================
+# CORS (WAŻNE)
+# =========================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # MVP: pozwalamy wszystkim
+    allow_origins=[
+        "http://localhost:8080",
+        "https://feedfix-production.up.railway.app",
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ---------------- HEALTH ----------------
+# =========================
+# ROOT
+# =========================
 
 @app.get("/")
 def home():
     return {"status": "FeedFix API działa"}
 
 
-# ---------------- ANALIZA JSON ----------------
+# =========================
+# JSON
+# =========================
 
 @app.post("/validate/url")
 def validate_feed(url: str = Form(...)):
 
     try:
 
-        response = requests.get(url, timeout=20)
+        r = requests.get(url, timeout=20)
 
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Nie można pobrać pliku XML"
-            )
+        if r.status_code != 200:
+            raise HTTPException(400, "Nie można pobrać XML")
 
-        root = ET.fromstring(response.content)
+        root = ET.fromstring(r.content)
 
-        result = validate_google_feed(root)
-
-        return result
+        return validate_google_feed(root)
 
     except Exception as e:
 
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+        raise HTTPException(500, str(e))
 
 
-# ---------------- ANALIZA + PDF ----------------
+# =========================
+# PDF
+# =========================
 
 @app.post("/validate/url/pdf")
 def validate_feed_pdf(url: str = Form(...)):
 
     try:
 
-        # Pobierz XML
-        response = requests.get(url, timeout=20)
+        r = requests.get(url, timeout=20)
 
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=400,
-                detail="Nie można pobrać pliku XML"
-            )
+        if r.status_code != 200:
+            raise HTTPException(400, "Nie można pobrać XML")
 
-        # Parsuj XML
-        root = ET.fromstring(response.content)
+        root = ET.fromstring(r.content)
 
-        # Waliduj
         result = validate_google_feed(root)
 
-        # Nazwa pliku
         file_id = uuid.uuid4().hex
-        filename = f"report_{file_id}.pdf"
+        name = f"report_{file_id}.pdf"
 
-        temp_path = os.path.join(
+        path = os.path.join(
             tempfile.gettempdir(),
-            filename
+            name
         )
 
-        # Generuj PDF
-        generate_pdf_report(result, temp_path)
+        generate_pdf_report(result, path)
 
-        # Wyślij PDF
-        with open(temp_path, "rb") as f:
-            pdf_data = f.read()
+        with open(path, "rb") as f:
+            pdf = f.read()
 
-        # Sprzątanie
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        if os.path.exists(path):
+            os.remove(path)
 
-        return pdf_data
+        return pdf
 
     except Exception as e:
 
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+        raise HTTPException(500, str(e))
