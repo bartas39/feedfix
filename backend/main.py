@@ -1,106 +1,121 @@
 # backend/main.py
 
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 import requests
-from lxml import etree
-import uuid
+import xml.etree.ElementTree as ET
+import tempfile
 import os
+import uuid
 
 from validator.google import validate_google_feed
 from report import generate_pdf_report
 
 
-app = FastAPI()
+# ---------------- APP ----------------
+
+app = FastAPI(
+    title="FeedFix API",
+    description="Analiza feedów Google Shopping",
+    version="1.0"
+)
 
 
-# -------------------------
-# Utils
-# -------------------------
+# ---------------- CORS ----------------
 
-def parse_xml(content: bytes):
-    try:
-        parser = etree.XMLParser(recover=False)
-        return etree.fromstring(content, parser=parser)
-    except Exception:
-        return None
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],      # MVP: pozwalamy wszystkim
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-# -------------------------
-# API Endpoints
-# -------------------------
+# ---------------- HEALTH ----------------
+
+@app.get("/")
+def home():
+    return {"status": "FeedFix API działa"}
+
+
+# ---------------- ANALIZA JSON ----------------
 
 @app.post("/validate/url")
-def validate_from_url(url: str = Form(...)):
+def validate_feed(url: str = Form(...)):
 
-    r = requests.get(url, timeout=20)
+    try:
 
-    if r.status_code != 200:
-        return {"error": "Nie można pobrać pliku"}
+        response = requests.get(url, timeout=20)
 
-    root = parse_xml(r.content)
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Nie można pobrać pliku XML"
+            )
 
-    if root is None:
-        return {"error": "Niepoprawny XML"}
+        root = ET.fromstring(response.content)
 
-    result = validate_google_feed(root)
+        result = validate_google_feed(root)
 
-    return result
+        return result
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
-@app.post("/validate/file")
-def validate_from_file(file: UploadFile = File(...)):
-
-    content = file.file.read()
-
-    root = parse_xml(content)
-
-    if root is None:
-        return {"error": "Niepoprawny XML"}
-
-    result = validate_google_feed(root)
-
-    return result
-
+# ---------------- ANALIZA + PDF ----------------
 
 @app.post("/validate/url/pdf")
-def validate_and_generate_pdf(url: str = Form(...)):
+def validate_feed_pdf(url: str = Form(...)):
 
-    r = requests.get(url, timeout=20)
+    try:
 
-    if r.status_code != 200:
-        return {"error": "Nie można pobrać pliku"}
+        # Pobierz XML
+        response = requests.get(url, timeout=20)
 
-    root = parse_xml(r.content)
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Nie można pobrać pliku XML"
+            )
 
-    if root is None:
-        return {"error": "Niepoprawny XML"}
+        # Parsuj XML
+        root = ET.fromstring(response.content)
 
-    result = validate_google_feed(root)
+        # Waliduj
+        result = validate_google_feed(root)
 
-    filename = f"report_{uuid.uuid4().hex}.pdf"
-    filepath = os.path.join("/tmp", filename)
+        # Nazwa pliku
+        file_id = uuid.uuid4().hex
+        filename = f"report_{file_id}.pdf"
 
-    generate_pdf_report(result, filepath)
+        temp_path = os.path.join(
+            tempfile.gettempdir(),
+            filename
+        )
 
-    return {
-        "status": "ok",
-        "file": filename,
-        "download_url": f"/download/{filename}"
-    }
+        # Generuj PDF
+        generate_pdf_report(result, temp_path)
 
+        # Wyślij PDF
+        with open(temp_path, "rb") as f:
+            pdf_data = f.read()
 
-@app.get("/download/{filename}")
-def download_report(filename: str):
+        # Sprzątanie
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
-    filepath = os.path.join("/tmp", filename)
+        return pdf_data
 
-    if not os.path.exists(filepath):
-        return {"error": "Plik nie istnieje"}
+    except Exception as e:
 
-    return FileResponse(
-        filepath,
-        media_type="application/pdf",
-        filename=filename
-    )
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
