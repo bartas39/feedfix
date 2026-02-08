@@ -1,6 +1,6 @@
 # backend/main.py
 
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import FastAPI, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 import requests
@@ -13,45 +13,38 @@ from validator.google import validate_google_feed
 from report import generate_pdf_report
 
 
-# =========================
+# =====================
 # APP
-# =========================
+# =====================
 
-app = FastAPI(
-    title="FeedFix API",
-    version="1.0"
-)
+app = FastAPI(title="FeedFix API", version="1.0")
 
 
-# =========================
-# CORS (WAŻNE)
-# =========================
+# =====================
+# CORS (GLOBAL)
+# =====================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080",
-        "https://feedfix-production.up.railway.app",
-        "*"
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# =========================
+# =====================
 # ROOT
-# =========================
+# =====================
 
 @app.get("/")
-def home():
-    return {"status": "FeedFix API działa"}
+def root():
+    return {"status": "FeedFix online"}
 
 
-# =========================
+# =====================
 # JSON
-# =========================
+# =====================
 
 @app.post("/validate/url")
 def validate_feed(url: str = Form(...)):
@@ -72,12 +65,12 @@ def validate_feed(url: str = Form(...)):
         raise HTTPException(500, str(e))
 
 
-# =========================
+# =====================
 # PDF
-# =========================
+# =====================
 
 @app.post("/validate/url/pdf")
-def validate_feed_pdf(url: str = Form(...)):
+def validate_pdf(url: str = Form(...), response: Response):
 
     try:
 
@@ -88,17 +81,14 @@ def validate_feed_pdf(url: str = Form(...)):
 
         root = ET.fromstring(r.content)
 
-        result = validate_google_feed(root)
+        data = validate_google_feed(root)
 
         file_id = uuid.uuid4().hex
         name = f"report_{file_id}.pdf"
 
-        path = os.path.join(
-            tempfile.gettempdir(),
-            name
-        )
+        path = os.path.join(tempfile.gettempdir(), name)
 
-        generate_pdf_report(result, path)
+        generate_pdf_report(data, path)
 
         with open(path, "rb") as f:
             pdf = f.read()
@@ -106,7 +96,11 @@ def validate_feed_pdf(url: str = Form(...)):
         if os.path.exists(path):
             os.remove(path)
 
-        return pdf
+        # Wymuś headers
+        response.headers["Content-Type"] = "application/pdf"
+        response.headers["Content-Disposition"] = "attachment; filename=raport.pdf"
+
+        return Response(content=pdf, media_type="application/pdf")
 
     except Exception as e:
 
