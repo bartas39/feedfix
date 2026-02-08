@@ -70,7 +70,7 @@ def validate_feed(url: str = Form(...)):
 # =====================
 
 @app.post("/validate/url/pdf")
-def validate_pdf(url: str = Form(...), response: Response):
+def validate_pdf(response: Response, url: str = Form(...)):
 
     try:
 
